@@ -143,8 +143,8 @@ def sort_features_by_weight(features):
 
 def train_classifier(features):
     print("Training classifier ...")
-    # return nltk.classify.DecisionTreeClassifier.train(features)
-    return nltk.classify.NaiveBayesClassifier.train(features)
+    return nltk.classify.DecisionTreeClassifier.train(features)
+    # return nltk.classify.NaiveBayesClassifier.train(features)
 
 def create_labeled_featuresets(fe):
     dev_train = []

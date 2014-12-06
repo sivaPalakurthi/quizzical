@@ -5,6 +5,8 @@ from math import sqrt
 from operator import itemgetter
 
 class ScoreCombiner:
+    kNORMALIZED_MAX = 100.
+
     def __init__(self, score_string1, score_string2):
         self._score_dict = defaultdict(float)
         self._combine(score_string1, score_string2)
@@ -32,12 +34,15 @@ class ScoreCombiner:
         max_score = max(score_dict.values())
         if max_score == 0:
             return dict()
-        normalizer = 100. / max_score
+        normalizer = self.kNORMALIZED_MAX / max_score
 
         for key in score_dict:
             score_dict[key] *= normalizer
 
         return score_dict
+
+    def bucketize_score(self, score, num_buckets):
+        return (int) (num_buckets * score / self._sqrt_sum_of_squares(self.kNORMALIZED_MAX, self.kNORMALIZED_MAX))
 
     def format_top_scores(self, top_number=5, join_string='\n\t'):
         return join_string + \
