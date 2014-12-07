@@ -1,0 +1,110 @@
+# Using separate bucket features for each type of score (bucket_norm_score:1 and bucket_norm_score:2)
+
+C:\Python27\python.exe C:/Users/Patrick/PycharmProjects/quizzical/decision_tree_classify.py data/train.csv
+
+=========================
+Run with num_score_buckets = 5
+Training classifier ...
+Accuracy on dev: 0.746988
+
+Completed in 23.36400 seconds.
+
+=========================
+Run with num_score_buckets = 6
+Training classifier ...
+Accuracy on dev: 0.748795
+
+Completed in 22.71900 seconds.
+
+=========================
+Run with num_score_buckets = 7
+Training classifier ...
+Accuracy on dev: 0.750000
+
+Completed in 22.58600 seconds.
+
+=========================
+Run with num_score_buckets = 8
+Training classifier ...
+Accuracy on dev: 0.751205
+
+Completed in 23.35300 seconds.
+
+=========================
+Run with num_score_buckets = 9
+Training classifier ...
+Accuracy on dev: 0.752410
+
+Completed in 23.39900 seconds.
+
+=========================
+Run with num_score_buckets = 10
+Training classifier ...
+Accuracy on dev: 0.753614
+
+Completed in 22.63800 seconds.
+
+=========================
+Run with num_score_buckets = 11
+Training classifier ...
+Accuracy on dev: 0.753012
+
+Completed in 23.27300 seconds.
+
+=========================
+Run with num_score_buckets = 12
+Training classifier ...
+Accuracy on dev: 0.753012
+
+Completed in 23.68000 seconds.
+
+=========================
+Run with num_score_buckets = 13
+Training classifier ...
+Accuracy on dev: 0.750602
+
+Completed in 23.35700 seconds.
+
+=========================
+Run with num_score_buckets = 14
+Training classifier ...
+Accuracy on dev: 0.751807
+
+Completed in 24.18200 seconds.
+
+=========================
+Run with num_score_buckets = 15
+Training classifier ...
+Accuracy on dev: 0.751205
+
+Completed in 24.66900 seconds.
+
+=========================
+Run with num_score_buckets = 16
+Training classifier ...
+Accuracy on dev: 0.751807
+
+Completed in 23.57500 seconds.
+
+=========================
+Run with num_score_buckets = 17
+Training classifier ...
+Accuracy on dev: 0.750602
+
+Completed in 23.87700 seconds.
+
+=========================
+Run with num_score_buckets = 18
+Training classifier ...
+Accuracy on dev: 0.753012
+
+Completed in 23.75800 seconds.
+
+=========================
+Run with num_score_buckets = 19
+Training classifier ...
+Accuracy on dev: 0.754217
+
+Completed in 24.46000 seconds.
+
+Process finished with exit code 0
