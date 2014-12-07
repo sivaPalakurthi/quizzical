@@ -1,4 +1,5 @@
 from math import sqrt
+from itertools import count
 from operator import itemgetter
 from collections import defaultdict
 from csv import DictReader, DictWriter
@@ -11,6 +12,9 @@ from nltk.tokenize import TreebankWordTokenizer
 from score_combiner import ScoreCombiner
 
 kTOKENIZER = TreebankWordTokenizer()
+
+# DEBUG
+counter = count()
 
 def morphy_stem(word):
     stem = wn.morphy(word)
@@ -26,16 +30,19 @@ class FeatureExtractor:
 
     def features(self, entry):
         combiner = ScoreCombiner(entry['QANTA Scores'], entry['IR_Wiki Scores'])
-        for guess, score in combiner.iteritems():
+        for guess, scores, combined_score in combiner.iteritems():
             feature_dict = defaultdict(float)
             # self.add_features_from_question_text(feature_dict, entry)
             self.add_category_feature(feature_dict, entry)
-            self.add_bucketized_score_feature(feature_dict, combiner.bucketize_score(score, self._num_score_buckets))
+            self.add_bucketized_score_feature(feature_dict, combiner, scores)
 
-            yield feature_dict, guess, score
+            yield feature_dict, guess, scores
 
-    def add_bucketized_score_feature(self, feature_dict, bucket):
-        feature_dict['score_bucket'] = bucket
+    def add_bucketized_score_feature(self, feature_dict, combiner, scores):
+        i = 1
+        for score in scores:
+            feature_dict['score_bucket_%s' % i] = combiner.bucketize_score(score, self._num_score_buckets)
+            i += 1
 
     def add_features_from_question_text(self, feature_dict, entry):
         text = tokenize_and_stem(entry['Question Text'])
@@ -90,7 +97,7 @@ def make_predictions_on_test_data(fe, classifier):
     for entry in DictReader(open(args.test_file)):
 
         predictions[entry['Question ID']] = \
-            (entry['Sentence Position'], make_prediction(classifier, fe.features(entry), entry))
+            (entry['Sentence Position'], make_prediction(fe, classifier, entry))
 
     return predictions
 
@@ -110,6 +117,9 @@ def make_prediction(fe, classifier, entry):
     # fails to produce a guess.
     prediction = max(classifier_predictions, key=itemgetter(1))[0] if len(classifier_predictions) > 0 \
         else top_guesses[0][0]
+    # prediction = max(classifier_predictions, key=itemgetter(1))[0] if len(classifier_predictions) > 0 \
+    #     else 'BOGUS'
+    # prediction = top_guesses[0][0]
 
     debug_prediction(classifier_predictions, prediction, entry, top_guesses)
 
@@ -130,8 +140,13 @@ def check_accuracy(fe, classifier, entries):
     print("Accuracy on dev: %f" % (float(right) / float(total)))
 
 def debug_prediction(classifier_predictions, prediction, entry, top_guesses):
-    if not args.debug or len(classifier_predictions) == 1:
+    # if not args.debug or len(classifier_predictions) == 1:
+    if not args.debug or prediction == entry['Answer']:
         return
+
+    # DEBUG
+    if prediction == 'BOGUS':
+        print 'Found bogus result, total so far:', counter.next()
 
     # debug('Answer:', labeled_featureset[1])
     debug('Answer:', entry['Answer'])
@@ -158,7 +173,7 @@ def sort_features_by_weight(features):
 
 def train_classifier(features):
     print("Training classifier ...")
-    return nltk.classify.DecisionTreeClassifier.train(features, verbose=True)
+    return nltk.classify.DecisionTreeClassifier.train(features) #, verbose=True)
     # return nltk.classify.NaiveBayesClassifier.train(features)
 
 def create_labeled_featuresets(fe):
@@ -176,13 +191,15 @@ def create_labeled_featuresets(fe):
 
         if int(entry['Question ID']) % 5 == 0:
             dev_test_entries.append(entry)
-            for features_for_guess, guess, score in fe.features(entry):
-                dev_test.append((features_for_guess, guess == entry['Answer']))
+            append_labeled_featuresets(fe, dev_test, entry)
         else:
-            for features_for_guess, guess, score in fe.features(entry):
-                dev_train.append((features_for_guess, guess == entry['Answer']))
+            append_labeled_featuresets(fe, dev_train, entry)
 
     return dev_train, dev_test, dev_test_entries
+
+def append_labeled_featuresets(fe, feature_list, entry):
+    for features_for_guess, guess, score in fe.features(entry):
+        feature_list.append((features_for_guess, guess == entry['Answer']))
 
 def choose_max_sentences(reader):
     filtered_entries = dict()

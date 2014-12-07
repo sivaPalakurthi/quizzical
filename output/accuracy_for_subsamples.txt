@@ -1,0 +1,10 @@
+C:\Python27_64-bit\python.exe C:/Users/Patrick/PycharmProjects/quizbowl/classify.py data/train.csv --choose_max_sentences --subsample=0.5
+Training classifier ...
+Accuracy on dev: 0.318919
+
+Completed in 247.31800 seconds.
+
+===============================
+
+
+

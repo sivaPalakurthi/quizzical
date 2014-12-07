@@ -8,7 +8,7 @@ class ScoreCombiner:
     kNORMALIZED_MAX = 100.
 
     def __init__(self, score_string1, score_string2):
-        self._score_dict = defaultdict(float)
+        self._score_dict = defaultdict(list)
         self._combine(score_string1, score_string2)
 
     def _combine(self, score_string1, score_string2):
@@ -17,14 +17,16 @@ class ScoreCombiner:
             self._incorporate_score(label, score)
 
     def sorted_list(self):
-        return sorted(self._score_dict.items(), key=itemgetter(1), reverse=True)
+        return sorted(self._score_dict.items(), reverse=True,
+                      key=lambda score_item: self._sqrt_sum_of_squares(score_item[1]))
 
     def _incorporate_score(self, label, score):
-        self._score_dict[label] = score if label not in self._score_dict else \
-            self._sqrt_sum_of_squares(self._score_dict[label], score)
+        # self._score_dict[label] = score if label not in self._score_dict else \
+        #     self._sqrt_sum_of_squares(self._score_dict[label], score)
+        self._score_dict[label].append(score)
 
-    def _sqrt_sum_of_squares(self, value1, value2):
-        return sqrt(value1 ** 2 + value2 ** 2)
+    def _sqrt_sum_of_squares(self, values):
+        return sqrt(sum([value ** 2 for value in values]))
 
     def _build_normalized_score_dict(self, score_string):
         return self._normalize_scores(dict([(key.strip(), float(value)) for key, value in
@@ -42,11 +44,13 @@ class ScoreCombiner:
         return score_dict
 
     def bucketize_score(self, score, num_buckets):
-        return (int) (num_buckets * score / self._sqrt_sum_of_squares(self.kNORMALIZED_MAX, self.kNORMALIZED_MAX))
+        # return (int) (num_buckets * score / self._sqrt_sum_of_squares(self.kNORMALIZED_MAX, self.kNORMALIZED_MAX))
+        return (int) (num_buckets * score / self.kNORMALIZED_MAX)
 
     def format_top_scores(self, top_number=5, join_string='\n\t'):
         return join_string + \
                join_string.join(['%s: %s' % (label, score) for label, score in self.sorted_list()[:top_number]])
 
     def iteritems(self):
-        return self._score_dict.iteritems()
+        for field, value in self._score_dict.iteritems():
+            yield field, value, self._sqrt_sum_of_squares(value)
