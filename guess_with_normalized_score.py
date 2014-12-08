@@ -2,57 +2,99 @@ from csv import DictReader, DictWriter
 import argparse
 
 from score_combiner import ScoreCombiner
+from collections import defaultdict
 
-def main():
-    check_accuracy(retrieve_dev_test_entries())
+import matplotlib.pyplot as plt
 
-    if args.test_file:
-        predictions = make_predictions_on_test_data()
+class AnswerPredicter:
+    kSCORE_TYPES = ['IR_Wiki Scores', 'QANTA Scores']
 
-    if args.prediction_file:
-        write_predictions(predictions)
+    def __init__(self, training_file, test_file, prediction_file, debug):
+        self._training_file = training_file
+        self._test_file = test_file
+        self._prediction_file = prediction_file
+        self._debug = debug
 
-def write_predictions(predictions):
-    output_file = DictWriter(open(args.prediction_file, 'w'), ['Question ID', 'Answer'])
-    output_file.writeheader()
+        self._combiner = ScoreCombiner(self.parse_all_scores(), 10)
 
-    for entry in sorted(predictions):
-        output_file.writerow({
-            'Question ID': entry,
-            'Answer': predictions[entry][1]})
+    def parse_all_scores(self):
+        score_dict = defaultdict(list)
+        for entry in DictReader(open(args.training_file, 'r')):
+            for type in self.kSCORE_TYPES:
+                score_dict[type].extend(self.parse_scores(entry[type]))
 
-def make_predictions_on_test_data():
-    predictions = {}
-    for entry in DictReader(open(args.test_file)):
-        predictions[entry['Question ID']] = \
-            (entry['Sentence Position'], make_prediction(entry))
+        return score_dict
 
-    return predictions
+    # TODO Combine methods?
+    def parse_entry_scores(self, entry):
+        score_dict = defaultdict(list)
+        for type in self.kSCORE_TYPES:
+            score_dict[type] = self.parse_scores(entry[type])
 
-def make_prediction(entry):
-    return ScoreCombiner(entry['QANTA Scores'], entry['IR_Wiki Scores']).sorted_list()[0][0]
+        return score_dict
 
-def check_accuracy(entries):
-    right = 0
-    total = len(entries)
-    for entry in entries:
-        prediction = make_prediction(entry)
-        if prediction == entry['Answer']:
-            right += 1
+    def parse_scores(self, score_string):
+        return [float(guess_score.split(':')[1]) for guess_score in score_string.split(', ')]
 
-    print("Accuracy on dev: %f" % (float(right) / float(total)))
+    def execute(self):
+        # DEBUG Plot normalized full score distributions
+        # print self._combiner._score_stats
+        #
+        # for type, stats in self._combiner._score_stats.iteritems():
+        #     plt.hist([value / stats.stddev() for value in stats.distribution()], bins=300)
+        #
+        # plt.show()
 
-def retrieve_dev_test_entries():
-    entries = []
-    for entry in DictReader(open(args.training_file, 'r')):
-        if int(entry['Question ID']) % 5 == 0:
-            entries.append(entry)
+        self.check_accuracy(self.retrieve_dev_test_entries())
 
-    return entries
+        if args.test_file:
+            predictions = self.make_predictions_on_test_data()
 
-def debug(*arguments):
-    if args.debug:
-        print ' '.join([str(argument) for argument in arguments])
+        if args.prediction_file:
+            self.write_predictions(predictions)
+
+    def write_predictions(self, predictions):
+        output_file = DictWriter(open(args.prediction_file, 'w'), ['Question ID', 'Answer'])
+        output_file.writeheader()
+
+        for entry in sorted(predictions):
+            output_file.writerow({
+                'Question ID': entry,
+                'Answer': predictions[entry][1]})
+
+    def make_predictions_on_test_data(self):
+        predictions = {}
+        for entry in DictReader(open(args.test_file)):
+            predictions[entry['Question ID']] = \
+                (entry['Sentence Position'], self.make_prediction(entry))
+
+        return predictions
+
+    # TODO Fix this
+    def make_prediction(self, entry):
+        return self._combiner.combine(self.parse_entry_scores(entry)).sorted_list()[0][0]
+
+    def check_accuracy(self, entries):
+        right = 0
+        total = len(entries)
+        for entry in entries:
+            prediction = self.make_prediction(entry)
+            if prediction == entry['Answer']:
+                right += 1
+
+        print("Accuracy on dev: %f" % (float(right) / float(total)))
+
+    def retrieve_dev_test_entries(self):
+        entries = []
+        for entry in DictReader(open(args.training_file, 'r')):
+            if int(entry['Question ID']) % 5 == 0:
+                entries.append(entry)
+
+        return entries
+
+    def debug(self, *arguments):
+        if args.debug:
+            print ' '.join([str(argument) for argument in arguments])
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Classify quiz bowl training data and predict answers for test data')
@@ -63,5 +105,5 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    main()
+    AnswerPredicter(args.training_file, args.test_file, args.prediction_file, args.debug).execute()
 

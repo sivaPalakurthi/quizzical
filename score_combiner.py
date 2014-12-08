@@ -3,24 +3,52 @@ __author__ = 'Patrick'
 from collections import defaultdict
 from math import sqrt
 from operator import itemgetter
+import numpy
+
+class ScoreStats:
+    def __init__(self, distribution):
+        self._distribution = distribution
+        np_array = numpy.array(distribution)
+
+        self._mean = np_array.mean()
+        self._stddev = np_array.std()
+
+    def distribution(self):
+        return self._distribution
+
+    def mean(self):
+        return self._mean
+
+    def stddev(self):
+        return self._stddev
+
+    def __repr__(self):
+        return 'Mean: %s, Std dev: %s' % (self._mean, self._stddev)
+
 
 class ScoreCombiner:
     kNORMALIZED_MAX = 100.
 
-    def __init__(self, score_string1, score_string2, max_score1, max_score2, num_buckets):
-        self._max_score1 = max_score1
-        self._max_score2 = max_score2
+    def __init__(self, score_distributions, num_buckets):
+        # self._max_score1 = max_score1
+        # self._max_score2 = max_score2
         self._num_buckets = num_buckets
 
         self._score_dict = defaultdict(dict)
-        self._combine(score_string1, score_string2, max_score1, max_score2)
+        # self.combine(score_string1, score_string2, max_score1, max_score2)
 
-    def _combine(self, score_string1, score_string2, max_score1, max_score2):
+        self._score_stats = dict()
+        for type, distribution in score_distributions.iteritems():
+            self._score_stats[type] = ScoreStats(distribution)
+
+    def combine(self, entry_score_distributions):
         # for label, score in self._build_normalized_score_dict(score_string1, max_score1).items() + \
         #                     self._build_normalized_score_dict(score_string2).items():
         #     self._incorporate_score(label, score)
-        self._add_scores_to_dict(score_string1, max_score1, '1')
-        self._add_scores_to_dict(score_string2, max_score2, '2')
+
+        for type, distribution in entry_score_distributions.iteritems():
+            self._add_scores_to_dict(distribution, type)
+            # self._add_scores_to_dict(score_string2, max_score2, '2')
 
         self._calculate_combined_scores()
 
@@ -42,28 +70,28 @@ class ScoreCombiner:
     def _sqrt_sum_of_squares(self, values):
         return sqrt(sum([value ** 2 for value in values]))
 
-    def _add_scores_to_dict(self, score_string, max_score, type_label):
-        for guess, score in [(guess.strip(), float(score)) for guess, score in [label_score_pairs.split(":") for \
+    def _add_scores_to_dict(self, score_string, score_type):
+        for guess, score in [(guess.strip(), float(score)) for guess, score in [label_score_pairs.split(":") for
                 label_score_pairs in score_string.split(", ")]]:
-            self._score_dict[guess]['original_score:%s' % type_label] = score
-            self._score_dict[guess]['bucket_score:%s' % type_label] = self.bucketize_score(score, max_score)
+            self._score_dict[guess]['original_score:%s' % score_type] = score
+            # self._score_dict[guess]['bucket_score:%s' % type_label] = self.bucketize_score(score, max_score)
 
-        for guess, norm_score in self._build_normalized_score_dict(score_string).iteritems():
-            self._score_dict[guess]['norm_score:%s' % type_label] = norm_score
-            self._score_dict[guess]['bucket_norm_score:%s' % type_label] = self.bucketize_score(norm_score, self.kNORMALIZED_MAX)
+        for guess, norm_score in self._build_normalized_score_dict(score_string, score_type).iteritems():
+            self._score_dict[guess]['norm_score:%s' % score_type] = norm_score
+            self._score_dict[guess]['bucket_norm_score:%s' % score_type] = self.bucketize_score(norm_score, self.kNORMALIZED_MAX)
 
-    def _build_normalized_score_dict(self, score_string):
+    def _build_normalized_score_dict(self, score_string, type_label):
         return self._normalize_scores(dict([(key.strip(), float(value)) for key, value in
-                [label_score_pairs.split(":") for label_score_pairs in score_string.split(", ")]]))
+                [label_score_pairs.split(":") for label_score_pairs in score_string.split(", ")]]), type_label)
 
-    def _normalize_scores(self, score_dict):
-        max_score = max(score_dict.values())
-        if max_score == 0:
-            return dict()
-        normalizer = self.kNORMALIZED_MAX / max_score
+    def _normalize_scores(self, score_dict, type_label):
+        # max_score = max(score_dict.values())
+        # if max_score == 0:
+        #     return dict()
+        # normalizer = self.kNORMALIZED_MAX / max_score
 
         for key in score_dict:
-            score_dict[key] *= normalizer
+            score_dict[key] /= self._score_stats[type_label].stddev()
 
         return score_dict
 
