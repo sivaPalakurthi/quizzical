@@ -21,7 +21,7 @@ class AnswerPredicter:
         score_dict = defaultdict(list)
         for entry in DictReader(open(args.training_file, 'r')):
             for type in self.kSCORE_TYPES:
-                score_dict[type].extend(self.parse_scores(entry[type]))
+                score_dict[type].extend(self.parse_scores(entry[type]).values())
 
         return score_dict
 
@@ -34,7 +34,11 @@ class AnswerPredicter:
         return score_dict
 
     def parse_scores(self, score_string):
-        return [float(guess_score.split(':')[1]) for guess_score in score_string.split(', ')]
+        scores = dict()
+        for guess, score in [guess_score.split(':') for guess_score in score_string.split(', ')]:
+            scores[guess.strip()] = float(score)
+
+        return scores
 
     def execute(self):
         # DEBUG Plot normalized full score distributions
@@ -72,15 +76,20 @@ class AnswerPredicter:
 
     # TODO Fix this
     def make_prediction(self, entry):
-        return self._combiner.combine(self.parse_entry_scores(entry)).sorted_list()[0][0]
+        # return self._combiner.combine(self.parse_entry_scores(entry)).sorted_list()[0][0]
+        return self._combiner.combine(self.parse_entry_scores(entry))[0][0]
 
     def check_accuracy(self, entries):
         right = 0
+        current = 0
         total = len(entries)
         for entry in entries:
+            current += 1
             prediction = self.make_prediction(entry)
             if prediction == entry['Answer']:
                 right += 1
+
+            print("Processed %s of %s entries..." % (current, total))
 
         print("Accuracy on dev: %f" % (float(right) / float(total)))
 
