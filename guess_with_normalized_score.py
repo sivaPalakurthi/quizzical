@@ -11,7 +11,7 @@ class AnswerPredicter:
 
     def __init__(self, training_file, test_file, prediction_file, debug):
         self._training_file = training_file
-        self._test_file = test_file
+        self._test_file = test_file,
         self._prediction_file = prediction_file
         self._debug = debug
 

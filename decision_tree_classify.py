@@ -32,31 +32,34 @@ class FeatureExtractor:
         # self._num_score_buckets = num_score_buckets
         self._stopwords = nltk.corpus.stopwords.words('english')
 
-    def features(self, entry, combiner):
-        for guess, score_info in combiner.iteritems():
+    def features(self, entry, entry_score_distributions, combiner):
+        for guess, guess_score_info in combiner.combine(entry_score_distributions):
             feature_dict = defaultdict(float)
             # self.add_features_from_question_text(feature_dict, entry)
             # self.add_category_feature(feature_dict, entry)
             # self.add_sentence_position_feature(feature_dict, entry)
-            self.add_bucketized_score_features(feature_dict, combiner, score_info)
+            self.add_bucketized_score_features(feature_dict, combiner, guess_score_info)
 
-            yield feature_dict, guess, score_info['combined_score']
+            yield feature_dict, guess, guess_score_info.combined_score()
 
     def add_sentence_position_feature(self, feature_dict, entry):
         feature_dict['sentence_position'] = entry['Sentence Position']
 
-    def add_bucketized_score_features(self, feature_dict, combiner, score_info):
+    def add_bucketized_score_features(self, feature_dict, combiner, guess_score_info):
         # i = 1
         # for score in scores:
         #     feature_dict['score_bucket_%s' % i] = combiner.bucketize_score(score, self._num_score_buckets)
         #     i += 1
-        for key, value in score_info.iteritems():
-            # if key.startswith('bucket_score'):
-            if key.startswith('bucket_norm_score'):
-                feature_dict[key] = value
-                # DEBUG
-                # feature_dict['bucket_norm_score:main' if not 'bucket_norm_score:main' in feature_dict \
-                #     else 'bucket_norm_score:secondary'] = value
+        # for key, value in score_info.iteritems():
+        #     # if key.startswith('bucket_score'):
+        #     if key.startswith('bucket_norm_score'):
+        #         feature_dict[key] = value
+        #         # DEBUG
+        #         # feature_dict['bucket_norm_score:main' if not 'bucket_norm_score:main' in feature_dict \
+        #         #     else 'bucket_norm_score:secondary'] = value
+        for type, score_info in guess_score_info.iteritems():
+            feature_dict['Score bucket: %s' % type] = score_info.bucket_score()
+
 
     def add_features_from_question_text(self, feature_dict, entry):
         text = tokenize_and_stem(entry['Question Text'])
@@ -84,6 +87,8 @@ class FeatureExtractor:
 
 
 class AnswerPredicter:
+    kSCORE_TYPES = ['IR_Wiki Scores', 'QANTA Scores']
+
     def __init__(self, training_file, test_file, prediction_file, subsample, choose_max_sentences, debug):
         self._training_file = training_file
         self._test_file = test_file
@@ -91,19 +96,23 @@ class AnswerPredicter:
         self._subsample = subsample
         self._choose_max_sentences = choose_max_sentences
         self._debug = debug
+        self._fe = FeatureExtractor()
 
-        self._max_score1, self._max_score2 = self.find_global_max_from_scores()
+        # self._max_score1, self._max_score2 = self.find_global_max_from_scores()
 
-    def find_global_max_from_scores(self):
-        qanta_scores = []
-        ir_wiki_scores = []
-        for entry in DictReader(open(self._training_file, 'r')):
-            qanta_scores.extend(self.parse_scores(entry['QANTA Scores']))
-            ir_wiki_scores.extend(self.parse_scores(entry['IR_Wiki Scores']))
+        self._combiner = ScoreCombiner(self.parse_all_scores(), 10)
 
-        # plt.hist(ir_wiki_scores, bins=200)
-        # plt.show()
-        return max(qanta_scores), max(ir_wiki_scores)
+    # def find_global_max_from_scores(self):
+    #     qanta_scores = []
+    #     ir_wiki_scores = []
+    #     for entry in DictReader(open(self._training_file, 'r')):
+    #         qanta_scores.extend(self.parse_scores(entry['QANTA Scores']))
+    #         ir_wiki_scores.extend(self.parse_scores(entry['IR_Wiki Scores']))
+    #
+    #     # plt.hist(qanta_scores, bins=200)
+    #     # plt.hist(ir_wiki_scores, bins=200)
+    #     # plt.show()
+    #     return max(qanta_scores), max(ir_wiki_scores)
 
     def execute_with_buckets(self, num_score_buckets):
         self._num_score_buckets = num_score_buckets
@@ -119,16 +128,16 @@ class AnswerPredicter:
         return accuracy
 
     def execute(self):
-        fe = FeatureExtractor() #args.num_score_buckets, max_score1, max_score2)
+        # fe = FeatureExtractor() #args.num_score_buckets, max_score1, max_score2)
 
-        dev_train, dev_test, dev_test_entries = self.create_labeled_featuresets(fe)
+        dev_train, dev_test, dev_test_entries = self.create_labeled_featuresets(self._fe)
         classifier = self.train_classifier(dev_train)
-        accuracy = self.check_accuracy(fe, classifier, dev_test_entries)
+        accuracy = self.check_accuracy(classifier, dev_test_entries)
 
         if self._test_file:
             # Retrain on all data
             classifier = self.train_classifier(dev_train + dev_test)
-            predictions = self.make_predictions_on_test_data(fe, classifier)
+            predictions = self.make_predictions_on_test_data(classifier)
 
         if self._prediction_file:
             self.write_predictions(predictions)
@@ -145,21 +154,22 @@ class AnswerPredicter:
                 'Answer': predictions[entry][1]})
 
     # TODO Make top-level class so we can store member variables, such as max scores???
-    def make_predictions_on_test_data(self, fe, classifier):
+    def make_predictions_on_test_data(self, classifier):
         predictions = {}
         for entry in DictReader(open(self._test_file)):
 
             predictions[entry['Question ID']] = \
-                (entry['Sentence Position'], self.make_prediction(fe, classifier, entry))
+                (entry['Sentence Position'], self.make_prediction(classifier, entry))
 
         return predictions
 
-    def make_prediction(self, fe, classifier, entry):
-        combiner = ScoreCombiner(entry['QANTA Scores'], entry['IR_Wiki Scores'],
-                                 self._max_score1, self._max_score2, self._num_score_buckets)
+    def make_prediction(self, classifier, entry):
+        # combiner = ScoreCombiner(entry['QANTA Scores'], entry['IR_Wiki Scores'],
+        #                          self._max_score1, self._max_score2, self._num_score_buckets)
 
         classifier_predictions = []
-        for features_for_guess, guess, combined_score in fe.features(entry, combiner):
+        entry_score_distributions = self.parse_entry_scores(entry)
+        for features_for_guess, guess, combined_score in self._fe.features(entry, entry_score_distributions, self._combiner):
             guess_is_predicted_answer = classifier.classify(features_for_guess)
             if guess_is_predicted_answer:
                 classifier_predictions.append((guess, combined_score))
@@ -167,7 +177,7 @@ class AnswerPredicter:
         # DEBUG
         # assert len(classifier_predictions) > 0
 
-        top_guesses = combiner.sorted_list()[:5]
+        top_guesses = self._combiner.combine(entry_score_distributions)[:5]
 
         # Select final prediction from classifier prediction with max score, or top guess from combined list if classifier
         # fails to produce a guess.
@@ -175,20 +185,19 @@ class AnswerPredicter:
             else top_guesses[0][0]
         # prediction = max(classifier_predictions, key=itemgetter(1))[0] if len(classifier_predictions) > 0 \
         #     else 'BOGUS'
-        # prediction = top_guesses[0][0]
 
         self.debug_prediction(classifier_predictions, prediction, entry, top_guesses)
 
         return prediction
 
-    def check_accuracy(self, fe, classifier, entries):
+    def check_accuracy(self, classifier, entries):
         # debug('Labels of trained classifier: %s' % classifier.labels())
 
         right = 0
         total = len(entries)
         # for labeled_featureset, dev_test_entry in zip(test_features, dev_test_entries):
         for entry in entries:
-            prediction = self.make_prediction(fe, classifier, entry)
+            prediction = self.make_prediction(classifier, entry)
 
             if prediction == entry['Answer']:
                 right += 1
@@ -248,19 +257,19 @@ class AnswerPredicter:
             if self._subsample < 1.0 and int(entry['Question ID']) % 1000 > 1000 * self._subsample:
                 continue
 
-            combiner = ScoreCombiner(entry['QANTA Scores'], entry['IR_Wiki Scores'],
-                             self._max_score1, self._max_score2, self._num_score_buckets)
+            # combiner = ScoreCombiner(entry['QANTA Scores'], entry['IR_Wiki Scores'],
+            #                  self._max_score1, self._max_score2, self._num_score_buckets)
 
             if int(entry['Question ID']) % 5 == 0:
                 dev_test_entries.append(entry)
-                self.append_labeled_featuresets(fe, dev_test, entry, combiner)
+                self.append_labeled_featuresets(fe, dev_test, entry)
             else:
-                self.append_labeled_featuresets(fe, dev_train, entry, combiner)
+                self.append_labeled_featuresets(fe, dev_train, entry)
 
         return dev_train, dev_test, dev_test_entries
 
-    def append_labeled_featuresets(self, fe, feature_list, entry, combiner):
-        for features_for_guess, guess, score in fe.features(entry, combiner):
+    def append_labeled_featuresets(self, fe, feature_list, entry):
+        for features_for_guess, guess, score in fe.features(entry, self.parse_entry_scores(entry), self._combiner):
             feature_list.append((features_for_guess, guess == entry['Answer']))
 
     def choose_max_sentences(self, reader):
@@ -270,8 +279,30 @@ class AnswerPredicter:
 
         return filtered_entries.values()
 
+    # def parse_scores(self, score_string):
+    #     return [float(guess_score.split(':')[1]) for guess_score in score_string.split(', ')]
+
+    def parse_all_scores(self):
+        score_dict = defaultdict(list)
+        for entry in DictReader(open(args.training_file, 'r')):
+            for type in self.kSCORE_TYPES:
+                score_dict[type].extend(self.parse_scores(entry[type]).values())
+
+        return score_dict
+
     def parse_scores(self, score_string):
-        return [float(guess_score.split(':')[1]) for guess_score in score_string.split(', ')]
+        scores = dict()
+        for guess, score in [guess_score.split(':') for guess_score in score_string.split(', ')]:
+            scores[guess.strip()] = float(score)
+
+        return scores
+
+    def parse_entry_scores(self, entry):
+        score_dict = defaultdict(list)
+        for type in self.kSCORE_TYPES:
+            score_dict[type] = self.parse_scores(entry[type])
+
+        return score_dict
 
     def debug(self, *arguments):
         if self._debug:
