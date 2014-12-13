@@ -10,8 +10,9 @@ import nltk
 from nltk.corpus import wordnet as wn
 from nltk.tokenize import TreebankWordTokenizer
 from score_combiner import ScoreCombiner
+from yagoFeatures import yagoScores
 
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 
 kTOKENIZER = TreebankWordTokenizer()
 
@@ -31,17 +32,25 @@ class FeatureExtractor:
         # self._max_score2 = max_score2
         # self._num_score_buckets = num_score_buckets
         self._stopwords = nltk.corpus.stopwords.words('english')
+        self.yago = yagoScores()
+        #yago.getScore(text,guessess)
 
     def features(self, entry, entry_score_distributions, combiner):
+        i = 0
+        #print (entry)
         for guess, guess_score_info in combiner.combine(entry_score_distributions):
+            i+=1
             feature_dict = defaultdict(float)
             # self.add_features_from_question_text(feature_dict, entry)
             # self.add_category_feature(feature_dict, entry)
             # self.add_sentence_position_feature(feature_dict, entry)
+            #print (str(guess) + "----" + str(guess_score_info))
             self.add_bucketized_score_features(feature_dict, combiner, guess_score_info)
-
+            self.add_yago_word_count_feature(feature_dict,entry,guess)
+            #print (str(feature_dict)+"--"+str(guess)+"--"+str(guess_score_info.combined_score()))
+            #print feature_dict
             yield feature_dict, guess, guess_score_info.combined_score()
-
+        #print (i)
     def add_sentence_position_feature(self, feature_dict, entry):
         feature_dict['sentence_position'] = entry['Sentence Position']
 
@@ -58,6 +67,7 @@ class FeatureExtractor:
         #         # feature_dict['bucket_norm_score:main' if not 'bucket_norm_score:main' in feature_dict \
         #         #     else 'bucket_norm_score:secondary'] = value
         for type, score_info in guess_score_info.iteritems():
+            #print (str(type)+"---"+str(score_info));
             feature_dict['Score bucket: %s' % type] = score_info.bucket_score()
 
 
@@ -84,7 +94,9 @@ class FeatureExtractor:
     # def add_guess_score_features(self, feature_dict, entry):
     #     for guess, score in ScoreCombiner(entry['QANTA Scores'], entry['IR_Wiki Scores']).iteritems():
     #         feature_dict['guess=' + guess] = int(round(score))
-
+    def add_yago_word_count_feature(self, feature_dict, entry,guess):
+        text = entry['Question Text']
+        feature_dict['yagoCount'] =  self.yago.getScore(text,guess)
 
 class AnswerPredicter:
     kSCORE_TYPES = ['IR_Wiki Scores', 'QANTA Scores']
@@ -131,6 +143,7 @@ class AnswerPredicter:
         # fe = FeatureExtractor() #args.num_score_buckets, max_score1, max_score2)
 
         dev_train, dev_test, dev_test_entries = self.create_labeled_featuresets(self._fe)
+        #print (dev_train)
         classifier = self.train_classifier(dev_train)
         accuracy = self.check_accuracy(classifier, dev_test_entries)
 
