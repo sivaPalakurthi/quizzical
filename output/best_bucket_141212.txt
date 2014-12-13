@@ -1,0 +1,9 @@
+Using combined score if no classifier prediction:
+
+Final best accuracy: 0.68916 buckets: 43
+
+
+Using bad prediction if no classifier prediction:
+
+Final best accuracy: 0.62530 buckets: 43
+

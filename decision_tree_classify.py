@@ -1,3 +1,5 @@
+import sys
+
 from math import sqrt
 from itertools import count
 from operator import itemgetter
@@ -9,10 +11,9 @@ import time
 import nltk
 from nltk.corpus import wordnet as wn
 from nltk.tokenize import TreebankWordTokenizer
-from score_combiner import ScoreCombiner
-from yagoFeatures import yagoScores
+from score_combiner import ScoreCombiner, ScoreInfo
 
-#import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 
 kTOKENIZER = TreebankWordTokenizer()
 
@@ -27,49 +28,29 @@ def tokenize_and_stem(text):
     return [morphy_stem(word.strip('.')) for word in kTOKENIZER.tokenize(text) if word != '.']
 
 class FeatureExtractor:
-    def __init__(self): #, num_score_buckets, max_score1, max_score2):
-        # self._max_score1 = max_score1
-        # self._max_score2 = max_score2
-        # self._num_score_buckets = num_score_buckets
+    def __init__(self):
         self._stopwords = nltk.corpus.stopwords.words('english')
-        self.yago = yagoScores()
-        #yago.getScore(text,guessess)
 
     def features(self, entry, entry_score_distributions, combiner):
-        i = 0
-        #print (entry)
         for guess, guess_score_info in combiner.combine(entry_score_distributions):
-            i+=1
             feature_dict = defaultdict(float)
             # self.add_features_from_question_text(feature_dict, entry)
             # self.add_category_feature(feature_dict, entry)
             # self.add_sentence_position_feature(feature_dict, entry)
-            #print (str(guess) + "----" + str(guess_score_info))
             self.add_bucketized_score_features(feature_dict, combiner, guess_score_info)
             self.add_yago_word_count_feature(feature_dict,entry,guess)
-            #print (str(feature_dict)+"--"+str(guess)+"--"+str(guess_score_info.combined_score()))
-            #print feature_dict
+
             yield feature_dict, guess, guess_score_info.combined_score()
-        #print (i)
+
     def add_sentence_position_feature(self, feature_dict, entry):
         feature_dict['sentence_position'] = entry['Sentence Position']
 
     def add_bucketized_score_features(self, feature_dict, combiner, guess_score_info):
-        # i = 1
-        # for score in scores:
-        #     feature_dict['score_bucket_%s' % i] = combiner.bucketize_score(score, self._num_score_buckets)
-        #     i += 1
-        # for key, value in score_info.iteritems():
-        #     # if key.startswith('bucket_score'):
-        #     if key.startswith('bucket_norm_score'):
-        #         feature_dict[key] = value
-        #         # DEBUG
-        #         # feature_dict['bucket_norm_score:main' if not 'bucket_norm_score:main' in feature_dict \
-        #         #     else 'bucket_norm_score:secondary'] = value
         for type, score_info in guess_score_info.iteritems():
-            #print (str(type)+"---"+str(score_info));
             feature_dict['Score bucket: %s' % type] = score_info.bucket_score()
-
+        # for type, score_info in guess_score_info.iteritems():
+        #     feature_dict['Score bucket: 1' if 'Score bucket: 1' not in feature_dict else 'Score bucket: 2'] = \
+        #         score_info.bucket_score()
 
     def add_features_from_question_text(self, feature_dict, entry):
         text = tokenize_and_stem(entry['Question Text'])
@@ -91,9 +72,6 @@ class FeatureExtractor:
     def add_category_feature(self, feature_dict, entry):
         feature_dict['category'] = entry['category']
 
-    # def add_guess_score_features(self, feature_dict, entry):
-    #     for guess, score in ScoreCombiner(entry['QANTA Scores'], entry['IR_Wiki Scores']).iteritems():
-    #         feature_dict['guess=' + guess] = int(round(score))
     def add_yago_word_count_feature(self, feature_dict, entry,guess):
         text = entry['Question Text']
         feature_dict['yagoCount'] =  self.yago.getScore(text,guess)
@@ -101,7 +79,8 @@ class FeatureExtractor:
 class AnswerPredicter:
     kSCORE_TYPES = ['IR_Wiki Scores', 'QANTA Scores']
 
-    def __init__(self, training_file, test_file, prediction_file, subsample, choose_max_sentences, debug):
+    def __init__(self, training_file, test_file, prediction_file, subsample, choose_max_sentences, stddev_cutoff,
+                 num_buckets, debug):
         self._training_file = training_file
         self._test_file = test_file
         self._prediction_file = prediction_file
@@ -110,27 +89,13 @@ class AnswerPredicter:
         self._debug = debug
         self._fe = FeatureExtractor()
 
-        # self._max_score1, self._max_score2 = self.find_global_max_from_scores()
+        self._combiner = ScoreCombiner(self.parse_all_scores(), stddev_cutoff, num_buckets)
 
-        self._combiner = ScoreCombiner(self.parse_all_scores(), 10)
-
-    # def find_global_max_from_scores(self):
-    #     qanta_scores = []
-    #     ir_wiki_scores = []
-    #     for entry in DictReader(open(self._training_file, 'r')):
-    #         qanta_scores.extend(self.parse_scores(entry['QANTA Scores']))
-    #         ir_wiki_scores.extend(self.parse_scores(entry['IR_Wiki Scores']))
-    #
-    #     # plt.hist(qanta_scores, bins=200)
-    #     # plt.hist(ir_wiki_scores, bins=200)
-    #     # plt.show()
-    #     return max(qanta_scores), max(ir_wiki_scores)
-
-    def execute_with_buckets(self, num_score_buckets):
-        self._num_score_buckets = num_score_buckets
+    def execute_with_buckets(self):
+        # self._num_score_buckets = num_score_buckets
 
         print '\n========================='
-        print 'Run with num_score_buckets = %s' % self._num_score_buckets
+        print 'Run with num_score_buckets = %s' % self._combiner.num_buckets()
         start_time = time.time()
 
         accuracy = self.execute()
@@ -139,11 +104,17 @@ class AnswerPredicter:
 
         return accuracy
 
-    def execute(self):
-        # fe = FeatureExtractor() #args.num_score_buckets, max_score1, max_score2)
+    def plot_data(self):
+        score_data = self.parse_all_scores()
 
+        for type in self._combiner._score_stats.keys():
+            buckets = [ScoreInfo(type, score, self._combiner.stddev_cutoff(), self._combiner.num_buckets(),
+                                self._combiner._score_stats[type]).bucket_score() for score in score_data[type]]
+            plt.hist([bucket for bucket in buckets if abs(bucket) < 100], bins=self._combiner.num_buckets())
+            plt.show()
+
+    def execute(self):
         dev_train, dev_test, dev_test_entries = self.create_labeled_featuresets(self._fe)
-        #print (dev_train)
         classifier = self.train_classifier(dev_train)
         accuracy = self.check_accuracy(classifier, dev_test_entries)
 
@@ -177,9 +148,6 @@ class AnswerPredicter:
         return predictions
 
     def make_prediction(self, classifier, entry):
-        # combiner = ScoreCombiner(entry['QANTA Scores'], entry['IR_Wiki Scores'],
-        #                          self._max_score1, self._max_score2, self._num_score_buckets)
-
         classifier_predictions = []
         entry_score_distributions = self.parse_entry_scores(entry)
         for features_for_guess, guess, combined_score in self._fe.features(entry, entry_score_distributions, self._combiner):
@@ -187,17 +155,14 @@ class AnswerPredicter:
             if guess_is_predicted_answer:
                 classifier_predictions.append((guess, combined_score))
 
-        # DEBUG
-        # assert len(classifier_predictions) > 0
-
         top_guesses = self._combiner.combine(entry_score_distributions)[:5]
 
         # Select final prediction from classifier prediction with max score, or top guess from combined list if classifier
         # fails to produce a guess.
-        prediction = max(classifier_predictions, key=itemgetter(1))[0] if len(classifier_predictions) > 0 \
-            else top_guesses[0][0]
         # prediction = max(classifier_predictions, key=itemgetter(1))[0] if len(classifier_predictions) > 0 \
-        #     else 'BOGUS'
+        #     else top_guesses[0][0]
+        prediction = max(classifier_predictions, key=itemgetter(1))[0] if len(classifier_predictions) > 0 \
+            else 'BOGUS'
 
         self.debug_prediction(classifier_predictions, prediction, entry, top_guesses)
 
@@ -208,7 +173,6 @@ class AnswerPredicter:
 
         right = 0
         total = len(entries)
-        # for labeled_featureset, dev_test_entry in zip(test_features, dev_test_entries):
         for entry in entries:
             prediction = self.make_prediction(classifier, entry)
 
@@ -221,7 +185,6 @@ class AnswerPredicter:
         return accuracy
 
     def debug_prediction(self, classifier_predictions, prediction, entry, top_guesses):
-        # if not args.debug or len(classifier_predictions) == 1:
         if not self._debug or prediction == entry['Answer']:
             return
 
@@ -246,9 +209,6 @@ class AnswerPredicter:
         #                                for key, value in sort_features_by_weight(features)))
         self.debug()
 
-        # DEBUG
-        # assert len(classifier_predictions) < 2
-
     def sort_features_by_weight(self, features):
         return sorted(features.items(), key=itemgetter(1), reverse=True)
 
@@ -270,9 +230,6 @@ class AnswerPredicter:
             if self._subsample < 1.0 and int(entry['Question ID']) % 1000 > 1000 * self._subsample:
                 continue
 
-            # combiner = ScoreCombiner(entry['QANTA Scores'], entry['IR_Wiki Scores'],
-            #                  self._max_score1, self._max_score2, self._num_score_buckets)
-
             if int(entry['Question ID']) % 5 == 0:
                 dev_test_entries.append(entry)
                 self.append_labeled_featuresets(fe, dev_test, entry)
@@ -291,9 +248,6 @@ class AnswerPredicter:
             filtered_entries[entry['Question ID']] = entry
 
         return filtered_entries.values()
-
-    # def parse_scores(self, score_string):
-    #     return [float(guess_score.split(':')[1]) for guess_score in score_string.split(', ')]
 
     def parse_all_scores(self):
         score_dict = defaultdict(list)
@@ -333,18 +287,26 @@ if __name__ == "__main__":
     parser.add_argument('--choose_max_sentences', action='store_true', help='only consider version of each question '
                                                                             'with max sentence position')
     parser.add_argument('--num-score-buckets', type=int, help='number of buckets for normalized scores in decision tree')
+    parser.add_argument('--stddev-cutoff', default=2, type=float, help='all scores more than this number of stddevs '
+                                                                     'from mean fall in single bucket')
     parser.add_argument('--debug', '-d', action='store_true', help='print verbose output for debugging')
     # TODO Add argument to output dev_train and dev_test entries, for debugging
 
     args = parser.parse_args()
 
     answer_predicter = AnswerPredicter(args.training_file, args.test_file, args.prediction_file, args.subsample,
-                                       args.choose_max_sentences, args.debug)
+                                       args.choose_max_sentences, args.stddev_cutoff, args.num_score_buckets,
+                                       args.debug)
+
+    # answer_predicter.plot_data()
+    # sys.exit(0)
 
     best_accuracy = 0.
     best_buckets = 0
-    for buckets in [args.num_score_buckets] if args.num_score_buckets else xrange(24, 100):
-        accuracy = answer_predicter.execute_with_buckets(buckets)
+    for buckets in [args.num_score_buckets] if args.num_score_buckets else xrange(10, 100):
+        # accuracy = answer_predicter.execute_with_buckets(buckets)
+        answer_predicter._combiner._num_buckets = buckets
+        accuracy = answer_predicter.execute_with_buckets()
         if accuracy > best_accuracy:
             best_accuracy = accuracy
             best_buckets = buckets

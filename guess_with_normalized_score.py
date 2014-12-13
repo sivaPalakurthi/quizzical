@@ -15,7 +15,7 @@ class AnswerPredicter:
         self._prediction_file = prediction_file
         self._debug = debug
 
-        self._combiner = ScoreCombiner(self.parse_all_scores(), 10)
+        self._combiner = ScoreCombiner(self.parse_all_scores(), None, None)
 
     def parse_all_scores(self):
         score_dict = defaultdict(list)
