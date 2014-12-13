@@ -11,7 +11,7 @@ from nltk.corpus import wordnet as wn
 from nltk.tokenize import TreebankWordTokenizer
 from score_combiner import ScoreCombiner
 from yagoFeatures import yagoScores
-
+from wikiscores import wikiscores
 #import matplotlib.pyplot as plt
 
 kTOKENIZER = TreebankWordTokenizer()
@@ -33,6 +33,8 @@ class FeatureExtractor:
         # self._num_score_buckets = num_score_buckets
         self._stopwords = nltk.corpus.stopwords.words('english')
         self.yago = yagoScores()
+        self.wik = wikiscores()
+        
         #yago.getScore(text,guessess)
 
     def features(self, entry, entry_score_distributions, combiner):
@@ -42,11 +44,13 @@ class FeatureExtractor:
             i+=1
             feature_dict = defaultdict(float)
             # self.add_features_from_question_text(feature_dict, entry)
-            # self.add_category_feature(feature_dict, entry)
-            # self.add_sentence_position_feature(feature_dict, entry)
+            self.add_category_feature(feature_dict, entry)
+            self.add_sentence_position_feature(feature_dict, entry)
             #print (str(guess) + "----" + str(guess_score_info))
             self.add_bucketized_score_features(feature_dict, combiner, guess_score_info)
-            self.add_yago_word_count_feature(feature_dict,entry,guess)
+            #self.add_yago_word_count_feature(feature_dict,entry,guess)
+            #self.add_wiki_score(feature_dict,entry,guess)
+            
             #print (str(feature_dict)+"--"+str(guess)+"--"+str(guess_score_info.combined_score()))
             #print feature_dict
             yield feature_dict, guess, guess_score_info.combined_score()
@@ -97,6 +101,11 @@ class FeatureExtractor:
     def add_yago_word_count_feature(self, feature_dict, entry,guess):
         text = entry['Question Text']
         feature_dict['yagoCount'] =  self.yago.getScore(text,guess)
+    
+    def add_wiki_score(self,feature_dict,entry,guess):    
+        if(int(entry['Sentence Position'])<2):
+            text = entry['Question Text']
+            feature_dict['WikiSearchFound'] = self.wik.getScore(text,guess)
 
 class AnswerPredicter:
     kSCORE_TYPES = ['IR_Wiki Scores', 'QANTA Scores']
@@ -146,7 +155,9 @@ class AnswerPredicter:
         #print (dev_train)
         classifier = self.train_classifier(dev_train)
         accuracy = self.check_accuracy(classifier, dev_test_entries)
-
+        
+        self.error_analysis(classifier, dev_test_entries)
+        
         if self._test_file:
             # Retrain on all data
             classifier = self.train_classifier(dev_train + dev_test)
@@ -156,6 +167,72 @@ class AnswerPredicter:
             self.write_predictions(predictions)
 
         return accuracy
+        
+    def error_analysis(self,classifier,entries):
+        cats= ['history','lit','science','social']
+        vals = ['wrong','right']
+        
+        right,wikiright,quantaright,bothright,bothwrong = 0,0,0,0,0
+        
+        err_file = DictWriter(open('errorAnalysis.csv', 'w'), ['Question ID','Question Text','Sentence Position','category','Answer','QANTA Scores','IR_Wiki Scores','Qanta Pos','Wiki Pos','Qanta CPos','Wiki CPos'])
+        err_file.writeheader()  
+        
+        res_cats = defaultdict(int)
+        res_pos = defaultdict(int)
+        self._num_score_buckets = 34
+        fe = FeatureExtractor()
+        #dev_train, dev_test, dev_test_entries = self.create_labeled_featuresets(fe)
+        #classifier = self.train_classifier(dev_train)
+
+        for entry in entries:
+            prediction = self.make_prediction(classifier,entry)
+            ans = 0
+            if prediction == entry['Answer']:
+                right += 1
+                ans = 1
+            else:
+                ansPos1 = -1
+                ansPos2 = -1
+                cPos1 = -1
+                cPos2 = -1
+                
+                i = 0
+                for each in entry['QANTA Scores'].split(","):
+                    i += 1
+                    #print each.split(":")[0]+"---"+entry["Answer"]
+                    if(each.split(":")[0].strip() == entry["Answer"].strip()):    
+                        ansPos1 = i
+                    if(each.split(":")[0].strip() == prediction.strip()):    
+                        cPos1 = i                        
+                i = 0
+                for each in entry['IR_Wiki Scores'].split(","):
+                    i += 1
+                    if(each.split(":")[0] == entry["Answer"]):    
+                        ansPos2 = i                                
+                    if(each.split(":")[0].strip() == prediction.strip()):    
+                        cPos2 = i
+                err_file.writerow({
+                    'Question ID':entry['Question ID'],'Question Text':entry['Question Text'],'Sentence Position':entry['Sentence Position'],'category':entry['category'],'Answer':entry['Answer'],'QANTA Scores':entry['QANTA Scores'],'IR_Wiki Scores':entry['IR_Wiki Scores'],'Qanta Pos':ansPos1,'Wiki Pos':ansPos2,'Qanta CPos':cPos1,'Wiki CPos':cPos2})
+
+
+            res_cats[entry['category'],vals[ans]]+=1
+            pos=int(entry['Sentence Position']) 
+            res_pos[pos,vals[ans]]+=1
+            
+        cat_percent = defaultdict(int)
+        for each in cats:
+            cat_percent[each] = float(res_cats[each,'right']) / float((res_cats[each,'right'] + res_cats[each,'wrong'])) 
+        cat_percent=sorted(cat_percent.items(), key=itemgetter(1), reverse=True)
+    
+        pos_percent = defaultdict(int)
+        for each in xrange(len(res_pos)/2):
+            pos_percent[each] = float(res_pos[each,'right']) / float((res_pos[each,'right'] + res_pos[each,'wrong'])) 
+        pos_percent=sorted(pos_percent.items(), key=itemgetter(1), reverse=True)
+                
+        print "\nAnalysis Sentence Pos:\n", res_pos
+        print "\nAnalysis Categories  :\n",res_cats    
+        print "\nAnalysis Cat. Percnt :\n",cat_percent
+        print "\nAnalysis Sen.Pos Per :\n",pos_percent
 
     def write_predictions(self, predictions):
         output_file = DictWriter(open(self._prediction_file, 'w'), ['Question ID', 'Answer'])
@@ -170,7 +247,20 @@ class AnswerPredicter:
     def make_predictions_on_test_data(self, classifier):
         predictions = {}
         for entry in DictReader(open(self._test_file)):
-
+            if(int(entry['Sentence Position'])<2):
+                if(len(entry['QANTA Wiki'])>2):
+                    prediction = entry['QANTA Wiki'].split(":")[0]
+                    prediction = prediction.replace(",","") 
+                    print prediction   
+                elif(len(entry['Wiki Wiki'])>2):
+                    prediction = entry['Wiki Wiki'].split(":")[0]
+                    prediction = prediction.replace(",","")
+                    print prediction
+                else:
+                    prediction = self.make_prediction(classifier, entry)
+            else:
+                prediction = self.make_prediction(classifier, entry)
+                
             predictions[entry['Question ID']] = \
                 (entry['Sentence Position'], self.make_prediction(classifier, entry))
 
@@ -210,7 +300,19 @@ class AnswerPredicter:
         total = len(entries)
         # for labeled_featureset, dev_test_entry in zip(test_features, dev_test_entries):
         for entry in entries:
-            prediction = self.make_prediction(classifier, entry)
+            if(int(entry['Sentence Position'])<2):
+                if(len(entry['QANTA Wiki'])>2):
+                    prediction = entry['QANTA Wiki'].split(":")[0]
+                    prediction = prediction.replace(",","") 
+                    print prediction   
+                elif(len(entry['Wiki Wiki'])>2):
+                    prediction = entry['Wiki Wiki'].split(":")[0]
+                    prediction = prediction.replace(",","")
+                    print prediction
+                else:
+                    prediction = self.make_prediction(classifier, entry)
+            else:
+                prediction = self.make_prediction(classifier, entry)
 
             if prediction == entry['Answer']:
                 right += 1
@@ -283,6 +385,7 @@ class AnswerPredicter:
 
     def append_labeled_featuresets(self, fe, feature_list, entry):
         for features_for_guess, guess, score in fe.features(entry, self.parse_entry_scores(entry), self._combiner):
+            #print features_for_guess
             feature_list.append((features_for_guess, guess == entry['Answer']))
 
     def choose_max_sentences(self, reader):
