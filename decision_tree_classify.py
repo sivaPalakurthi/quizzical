@@ -12,6 +12,7 @@ import nltk
 from nltk.corpus import wordnet as wn
 from nltk.tokenize import TreebankWordTokenizer
 from score_combiner import ScoreCombiner, ScoreInfo
+from yagoFeatures import yagoScores
 
 import matplotlib.pyplot as plt
 
@@ -30,6 +31,7 @@ def tokenize_and_stem(text):
 class FeatureExtractor:
     def __init__(self):
         self._stopwords = nltk.corpus.stopwords.words('english')
+        self.yago = yagoScores()
 
     def features(self, entry, entry_score_distributions, combiner):
         for guess, guess_score_info in combiner.combine(entry_score_distributions):
