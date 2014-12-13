@@ -38,7 +38,13 @@ class wikiscores:
         #print text  
         links = wikipedia.search(text)
         #print ("LINKS")
-        #print links    
+        #print links
+        return links
+        if(len(links) == 1):
+            link = links[0].lower()
+            link = link.replace(" ","_")
+            return link
+            
         for link in links:
             link = link.lower()
             link = link.replace(" ","_")

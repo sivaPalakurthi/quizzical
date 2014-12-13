@@ -247,15 +247,18 @@ class AnswerPredicter:
     def make_predictions_on_test_data(self, classifier):
         predictions = {}
         for entry in DictReader(open(self._test_file)):
-            if(int(entry['Sentence Position'])<2):
+            if(len(entry['One Link'])>2 and 'list' not in entry['One Link'] and '2013' not in entry['One Link']):
+                prediction = entry['One Link']
+                print "One LInk"+prediction
+            elif(int(entry['Sentence Position'])<2):
                 if(len(entry['QANTA Wiki'])>2):
                     prediction = entry['QANTA Wiki'].split(":")[0]
                     prediction = prediction.replace(",","") 
-                    print prediction   
+                    print "qanta:"+prediction   
                 elif(len(entry['Wiki Wiki'])>2):
                     prediction = entry['Wiki Wiki'].split(":")[0]
                     prediction = prediction.replace(",","")
-                    print prediction
+                    print "wiki:"+prediction
                 else:
                     prediction = self.make_prediction(classifier, entry)
             else:
