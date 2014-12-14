@@ -54,6 +54,7 @@ class GuessScoreInfo:
 
     def _magic_offset(self, type):
         return 0.1 if type == 'QANTA Scores' else 3
+        # return 0
 
     def get_score_info(self, type):
         return self._type_dict[type]

@@ -12,7 +12,9 @@ import nltk
 from nltk.corpus import wordnet as wn
 from nltk.tokenize import TreebankWordTokenizer
 from score_combiner import ScoreCombiner, ScoreInfo
-from yagoFeatures import yagoScores
+# from yagoFeatures import yagoScores
+# from wikiscores import wikiscores
+#import matplotlib.pyplot as plt
 
 import matplotlib.pyplot as plt
 
@@ -31,16 +33,23 @@ def tokenize_and_stem(text):
 class FeatureExtractor:
     def __init__(self):
         self._stopwords = nltk.corpus.stopwords.words('english')
-        self.yago = yagoScores()
+        # self.yago = yagoScores()
+        # self.wik = wikiscores()
 
     def features(self, entry, entry_score_distributions, combiner):
+        # i = 0
+        #print (entry)
         for guess, guess_score_info in combiner.combine(entry_score_distributions):
+            # i+=1
             feature_dict = defaultdict(float)
             # self.add_features_from_question_text(feature_dict, entry)
             # self.add_category_feature(feature_dict, entry)
             # self.add_sentence_position_feature(feature_dict, entry)
             self.add_bucketized_score_features(feature_dict, combiner, guess_score_info)
-            self.add_yago_word_count_feature(feature_dict,entry,guess)
+            # self.add_yago_word_count_feature(feature_dict,entry,guess)
+            # self.add_wiki_score(feature_dict,entry,guess)
+
+            # self.add_yago_score(feature_dict, entry, entry_score_distributions, guess)
 
             yield feature_dict, guess, guess_score_info.combined_score()
 
@@ -74,9 +83,42 @@ class FeatureExtractor:
     def add_category_feature(self, feature_dict, entry):
         feature_dict['category'] = entry['category']
 
-    def add_yago_word_count_feature(self, feature_dict, entry,guess):
-        text = entry['Question Text']
-        feature_dict['yagoCount'] =  self.yago.getScore(text,guess)
+    # def add_yago_word_count_feature(self, feature_dict, entry,guess):
+    #     text = entry['Question Text']
+    #     feature_dict['yagoCount'] =  self.yago.getScore(text,guess)
+
+    def add_wiki_score(self, feature_dict, entry, guess):
+        # if(int(entry['Sentence Position']) < 2):
+            # text = entry['Question Text']
+            # feature_dict['WikiSearchFound'] = self.wik.getScore(text,guess)
+        for wiki_type in ['QANTA Wiki', 'Wiki Wiki']:
+            if ':' in entry[wiki_type]:
+                feature_dict[wiki_type + ' Match'] = self._guess_matches(entry, wiki_type, guess)
+        # if ':' in entry['Wiki Wiki']:
+        #     feature_dict['IR_Wiki-Wikipedia Match'] = self._guess_matches(entry, 'Wiki Wiki', guess)
+
+    def add_yago_score(self, feature_dict, entry, entry_score_distributions, guess):
+        feature_dict['yago QANTA noun score'] = (int) (entry['qanta noun'].split(',')[self._find_guess_index(entry, guess)])
+
+    def _guess_matches(self, entry, key, guess):
+         # return guess ==  self._normalize_answer(entry[key].split(":")[0])
+        return guess == entry[key].split(':')[0]
+
+    def _normalize_answer(self, answer):
+        return answer.lower().replace(' ', '_')
+
+    def _find_guess_index(self, entry, guess):
+        # index = 0
+        #
+        # for guess_score_info in guess_score_list:
+        #     if guess_score_info.guess() == guess:
+        #         return index
+        #     index += 1
+        #
+        # return None
+
+        return [guess for guess, score in
+                [guess_score.split(':') for guess_score in entry['QANTA Scores'].split(', ')]].index(guess)
 
 class AnswerPredicter:
     kSCORE_TYPES = ['IR_Wiki Scores', 'QANTA Scores']
@@ -120,6 +162,8 @@ class AnswerPredicter:
         classifier = self.train_classifier(dev_train)
         accuracy = self.check_accuracy(classifier, dev_test_entries)
 
+        self.error_analysis(classifier, dev_test_entries)
+
         if self._test_file:
             # Retrain on all data
             classifier = self.train_classifier(dev_train + dev_test)
@@ -129,6 +173,72 @@ class AnswerPredicter:
             self.write_predictions(predictions)
 
         return accuracy
+
+    def error_analysis(self,classifier,entries):
+        cats= ['history','lit','science','social']
+        vals = ['wrong','right']
+
+        right,wikiright,quantaright,bothright,bothwrong = 0,0,0,0,0
+
+        err_file = DictWriter(open('errorAnalysis.csv', 'w'), ['Question ID','Question Text','Sentence Position','category','Answer','QANTA Scores','IR_Wiki Scores','Qanta Pos','Wiki Pos','Qanta CPos','Wiki CPos'])
+        err_file.writeheader()
+
+        res_cats = defaultdict(int)
+        res_pos = defaultdict(int)
+        self._num_score_buckets = 34
+        fe = FeatureExtractor()
+        #dev_train, dev_test, dev_test_entries = self.create_labeled_featuresets(fe)
+        #classifier = self.train_classifier(dev_train)
+
+        for entry in entries:
+            prediction = self.make_prediction(classifier,entry)
+            ans = 0
+            if prediction == entry['Answer']:
+                right += 1
+                ans = 1
+            else:
+                ansPos1 = -1
+                ansPos2 = -1
+                cPos1 = -1
+                cPos2 = -1
+
+                i = 0
+                for each in entry['QANTA Scores'].split(","):
+                    i += 1
+                    #print each.split(":")[0]+"---"+entry["Answer"]
+                    if(each.split(":")[0].strip() == entry["Answer"].strip()):
+                        ansPos1 = i
+                    if(each.split(":")[0].strip() == prediction.strip()):
+                        cPos1 = i
+                i = 0
+                for each in entry['IR_Wiki Scores'].split(","):
+                    i += 1
+                    if(each.split(":")[0] == entry["Answer"]):
+                        ansPos2 = i
+                    if(each.split(":")[0].strip() == prediction.strip()):
+                        cPos2 = i
+                err_file.writerow({
+                    'Question ID':entry['Question ID'],'Question Text':entry['Question Text'],'Sentence Position':entry['Sentence Position'],'category':entry['category'],'Answer':entry['Answer'],'QANTA Scores':entry['QANTA Scores'],'IR_Wiki Scores':entry['IR_Wiki Scores'],'Qanta Pos':ansPos1,'Wiki Pos':ansPos2,'Qanta CPos':cPos1,'Wiki CPos':cPos2})
+
+
+            res_cats[entry['category'],vals[ans]]+=1
+            pos=int(entry['Sentence Position'])
+            res_pos[pos,vals[ans]]+=1
+
+        cat_percent = defaultdict(int)
+        for each in cats:
+            cat_percent[each] = float(res_cats[each,'right']) / float((res_cats[each,'right'] + res_cats[each,'wrong']))
+        cat_percent=sorted(cat_percent.items(), key=itemgetter(1), reverse=True)
+
+        pos_percent = defaultdict(int)
+        for each in xrange(len(res_pos)/2):
+            pos_percent[each] = float(res_pos[each,'right']) / float((res_pos[each,'right'] + res_pos[each,'wrong']))
+        pos_percent=sorted(pos_percent.items(), key=itemgetter(1), reverse=True)
+
+        print "\nAnalysis Sentence Pos:\n", res_pos
+        print "\nAnalysis Categories  :\n",res_cats
+        print "\nAnalysis Cat. Percnt :\n",cat_percent
+        print "\nAnalysis Sen.Pos Per :\n",pos_percent
 
     def write_predictions(self, predictions):
         output_file = DictWriter(open(self._prediction_file, 'w'), ['Question ID', 'Answer'])
@@ -143,9 +253,22 @@ class AnswerPredicter:
     def make_predictions_on_test_data(self, classifier):
         predictions = {}
         for entry in DictReader(open(self._test_file)):
+            if(int(entry['Sentence Position'])<2):
+                if(len(entry['QANTA Wiki'])>2):
+                    prediction = entry['QANTA Wiki'].split(":")[0]
+                    prediction = prediction.replace(",","")
+                    print "qanta:"+prediction
+                elif(len(entry['Wiki Wiki'])>2):
+                    prediction = entry['Wiki Wiki'].split(":")[0]
+                    prediction = prediction.replace(",","")
+                    print "wiki:"+prediction
+                else:
+                    prediction = self.make_prediction(classifier, entry)
+            else:
+                prediction = self.make_prediction(classifier, entry)
 
             predictions[entry['Question ID']] = \
-                (entry['Sentence Position'], self.make_prediction(classifier, entry))
+                (entry['Sentence Position'], prediction)
 
         return predictions
 
@@ -157,18 +280,26 @@ class AnswerPredicter:
             if guess_is_predicted_answer:
                 classifier_predictions.append((guess, combined_score))
 
+            if len(features_for_guess) > 0:
+                self.debug_features_for_guess(features_for_guess, entry, guess, combined_score)
+
         top_guesses = self._combiner.combine(entry_score_distributions)[:5]
 
         # Select final prediction from classifier prediction with max score, or top guess from combined list if classifier
         # fails to produce a guess.
-        # prediction = max(classifier_predictions, key=itemgetter(1))[0] if len(classifier_predictions) > 0 \
-        #     else top_guesses[0][0]
         prediction = max(classifier_predictions, key=itemgetter(1))[0] if len(classifier_predictions) > 0 \
-            else 'BOGUS'
+            else top_guesses[0][0]
+        # prediction = max(classifier_predictions, key=itemgetter(1))[0] if len(classifier_predictions) > 0 \
+        #     else 'BOGUS'
 
-        self.debug_prediction(classifier_predictions, prediction, entry, top_guesses)
+        # self.debug_prediction(classifier_predictions, prediction, entry, top_guesses)
 
         return prediction
+
+    def debug_features_for_guess(self, features_for_guess, entry, guess, combined_score):
+        self.debug('Question Text: ', entry['Question Text'])
+        self.debug('Guess: ', guess)
+        self.debug('Features: ', features_for_guess)
 
     def check_accuracy(self, classifier, entries):
         # debug('Labels of trained classifier: %s' % classifier.labels())
@@ -176,7 +307,19 @@ class AnswerPredicter:
         right = 0
         total = len(entries)
         for entry in entries:
-            prediction = self.make_prediction(classifier, entry)
+            if(int(entry['Sentence Position'])<2):
+                if(len(entry['QANTA Wiki'])>2):
+                    prediction = entry['QANTA Wiki'].split(":")[0]
+                    prediction = prediction.replace(",","")
+                    print prediction
+                elif(len(entry['Wiki Wiki'])>2):
+                    prediction = entry['Wiki Wiki'].split(":")[0]
+                    prediction = prediction.replace(",","")
+                    print prediction
+                else:
+                    prediction = self.make_prediction(classifier, entry)
+            else:
+                prediction = self.make_prediction(classifier, entry)
 
             if prediction == entry['Answer']:
                 right += 1
@@ -216,8 +359,13 @@ class AnswerPredicter:
 
     def train_classifier(self, features):
         print("Training classifier ...")
-        return nltk.classify.DecisionTreeClassifier.train(features) #, verbose=True)
-        # return nltk.classify.NaiveBayesClassifier.train(features)
+        classifier = nltk.classify.DecisionTreeClassifier.train(features)
+
+        print(classifier.pp())
+        print(classifier.pseudocode())
+
+        return classifier
+
 
     def create_labeled_featuresets(self, fe):
         dev_train = []
@@ -289,7 +437,7 @@ if __name__ == "__main__":
     parser.add_argument('--choose_max_sentences', action='store_true', help='only consider version of each question '
                                                                             'with max sentence position')
     parser.add_argument('--num-score-buckets', type=int, help='number of buckets for normalized scores in decision tree')
-    parser.add_argument('--stddev-cutoff', default=2, type=float, help='all scores more than this number of stddevs '
+    parser.add_argument('--stddev-cutoff', default=10, type=float, help='all scores more than this number of stddevs '
                                                                      'from mean fall in single bucket')
     parser.add_argument('--debug', '-d', action='store_true', help='print verbose output for debugging')
     # TODO Add argument to output dev_train and dev_test entries, for debugging
